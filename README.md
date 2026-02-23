@@ -15,8 +15,9 @@
 4. (1%) Limited sight! Only print a 11x11 region of the maze, centered by the player. Modify the title screen to have 3 menu items, arranged vertically. The items are “start game”, “limited sight” and “exit”. Use W and S to navigate the menu items. Press Enter to select the item. Selecting the “limited sight” menu item will toggle this game mode (without starting the game). 5. (1%) Introduce teleportation blocks, shown as the character ‘*’, in the corridor. Stepping on such a block will move the player to another random teleportation block. (Ensure that other advanced features still work if there is any)  
 8. (1%) Traps! Generate spike blocks on the corridor. For every spike block, fix a random time interval. The spike will be activated after the interval, and be deactivated after another interval, and so on and so forth. When the spike is activated, it is shown as “w”. Stepping on it loses the game (See feature 7 for the requirement after losing a game). When the spike is deactivated, it is a normal corridor. The player can pass through it safely.   
 9. (1%) Grab the key before leaving! A key, shown as “k” is randomly generated in the corridor. Stepping on it takes the key (and shows that the player owns the key somewhere in the game). The player must grab the key before stepping on the exit to win the game.  
-11. (1%) The exit is now moving away from the player! It will move once after the player moves twice. (Find which direction can increase the “distance” from the user. The “distance” means the number of moves for the player to reach the exit)**Expected score**  
-  
+11. (1%) The exit is now moving away from the player! It will move once after the player moves twice. (Find which direction can increase the “distance” from the user. The “distance” means the number of moves for the player to reach the exit)
+    
+**Expected score**  
 Basic :         27  
 Advanced :  10  
 Total  :         37  
