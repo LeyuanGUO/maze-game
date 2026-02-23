@@ -1,55 +1,787 @@
-# Prerequisites
-*.d
+#include <curses.h>
+#include <stdlib.h>
+#include <string.h>
+#include <locale.h>
+#include <time.h>
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
+#define MAZE_HEIGHT 25
+#define MAZE_WIDTH 41
 
-# Linker output
-*.ilk
-*.map
-*.exp
+#define COLOR_PLAYER 1
+#define COLOR_EXIT 2
+#define COLOR_KEY 3
+#define COLOR_WALL 4
+#define COLOR_TELEPORTER 5
+#define COLOR_TRAP 6
 
-# Precompiled Headers
-*.gch
-*.pch
+#define STATE_TITLE 0
+#define STATE_PLAYING 1
+#define STATE_WIN 2
+#define STATE_LOSE 3
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
+#define FEATURE_LIMITED_SIGHT    (1 << 0)
+#define FEATURE_TELEPORTERS      (1 << 1)
+#define FEATURE_TRAPS            (1 << 2)
+#define FEATURE_KEY_COLLECTION   (1 << 3)
+#define FEATURE_MOVING_EXIT      (1 << 4)
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+void generate_random_maze(char maze[MAZE_HEIGHT][MAZE_WIDTH]);
+void print_maze(char maze[MAZE_HEIGHT][MAZE_WIDTH], int player_y, int player_x, int exit_y, int exit_x);
+int calculate_actual_distance(char maze[MAZE_HEIGHT][MAZE_WIDTH], int start_x, int start_y, int target_x, int target_y);
+WINDOW* init_ncurses();
+void title_screen();
+int handle_title_input();
+void game_loop();
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+int game_state = STATE_TITLE;
+int features = 0;
+int player_has_key = 0;
+int player_move_count = 0;
+int viewport_x = 0;
+int viewport_y = 0;
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+int main(void) {
+    setlocale(LC_ALL, "en_US.UTF-8");
+    WINDOW *win = init_ncurses();
+    int ch;
+    resizeterm(MAZE_HEIGHT + 5, MAZE_WIDTH * 2);
+    
+    
+    while(1){
+        switch (game_state) {
+            case STATE_TITLE:
+                title_screen();
+                if (handle_title_input() == 1) {
+                    endwin();
+                    return 0;
+                }
+                refresh();
+                break;
+            case STATE_PLAYING:
+                game_loop();
+                break;
+            case STATE_WIN:
+                clear();
+                mvprintw(MAZE_HEIGHT/2 - 1, (MAZE_WIDTH - 21)/2, "Congratulations! You win!");
+                mvprintw(MAZE_HEIGHT/2, (MAZE_WIDTH - 21)/2, "Press ESC to return to menu");
+                refresh();
+                while(getch() != 27);
+                game_state = STATE_TITLE;
+                break;
+            case STATE_LOSE:
+                clear();
+                mvprintw(MAZE_HEIGHT/2 - 1, (MAZE_WIDTH - 16)/2, "Game Over! You lose!");
+                mvprintw(MAZE_HEIGHT/2, (MAZE_WIDTH - 21)/2, "Press ESC to return to menu");
+                refresh();
+                while(getch() != 27);
+                game_state = STATE_TITLE;
+                break;
+        }
+    }
+    
+    endwin();
+    
+    return 0;
+}
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+WINDOW* init_ncurses() {
+    WINDOW *win = initscr();
+    if (win == NULL) {
+        printf("initscr() failed\n");
+        exit(1);
+    }
+    start_color();
+    
+    init_pair(COLOR_PLAYER, COLOR_CYAN, COLOR_BLACK);
+    init_pair(COLOR_EXIT, COLOR_GREEN, COLOR_BLACK);
+    init_pair(COLOR_KEY, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(COLOR_WALL, COLOR_WHITE, COLOR_BLACK);
+    init_pair(COLOR_TELEPORTER, COLOR_MAGENTA, COLOR_BLACK);
+    init_pair(COLOR_TRAP, COLOR_RED, COLOR_BLACK);
+    
+    cbreak();
+    noecho();
+    curs_set(0);
+    intrflush(win, FALSE);
+    keypad(win, TRUE);
+    halfdelay(1);
+    refresh();
+    return win;
+}
+void title_screen() {
+    clear();
+    
+    int term_height, term_width;    getmaxyx(stdscr, term_height, term_width);
+    mvprintw(term_height/2 - 8, term_width/2 - 10, "Welcome to Maze Game!");
+    mvprintw(term_height/2 - 7, term_width/2 - 15, "Press the number to turn on/off mode");
+    mvprintw(term_height/2 - 6, term_width/2 - 10, "Menu Options:");
+    mvprintw(term_height/2 - 5, term_width/2 - 10, "1. Start Game");
+    mvprintw(term_height/2 - 4, term_width/2 - 10, "2. Limited Sight: %s", (features & FEATURE_LIMITED_SIGHT) ? "ON" : "OFF");
+    mvprintw(term_height/2 - 3, term_width/2 - 10, "3. Key Collection: %s", (features & FEATURE_KEY_COLLECTION) ? "ON" : "OFF");
+    mvprintw(term_height/2 - 2, term_width/2 - 10, "4. Teleporters: %s", (features & FEATURE_TELEPORTERS) ? "ON" : "OFF");
+    mvprintw(term_height/2 - 1, term_width/2 - 10, "5. Traps: %s", (features & FEATURE_TRAPS) ? "ON" : "OFF");
+    mvprintw(term_height/2    , term_width/2 - 10, "6. Moving Exit: %s", (features & FEATURE_MOVING_EXIT) ? "ON" : "OFF");
+    mvprintw(term_height/2 + 1, term_width/2 - 10, "   Press 'Enter' to start");
+    mvprintw(term_height/2 + 2, term_width/2 - 10, "   Press 'ESC' to exit");
+    refresh();
+}
 
-# debug information files
-*.dwo
+int handle_title_input() {
+    int ch;
+    
+    while (1) {
+        ch = getch();
+        if (ch == ERR) {
+           title_screen();
+           continue;}
+
+        else {
+        switch (ch) {
+            case '1':
+                game_state = STATE_PLAYING;
+                return 0;
+            case '2':
+                features ^= FEATURE_LIMITED_SIGHT;
+                title_screen();
+                break;
+            case '3':
+                features ^= FEATURE_KEY_COLLECTION;
+                title_screen();
+                break;
+            case '4':
+                features ^= FEATURE_TELEPORTERS;
+                title_screen();
+                break;
+            case '5':
+                features ^= FEATURE_TRAPS;
+                title_screen();
+                break;
+            case '6':
+                features ^= FEATURE_MOVING_EXIT;
+                title_screen();
+                break;
+            
+            case 10:
+            case 13:
+                game_state = STATE_PLAYING;
+                return 0;
+            case 27:
+                return 1;
+        }
+    }
+    }
+    
+    return 0;
+}
+void generate_random_maze(char maze[MAZE_HEIGHT][MAZE_WIDTH]) {
+    srand(time(NULL));
+    
+    for (int i = 0; i < MAZE_HEIGHT; i++) {
+        for (int j = 0; j < MAZE_WIDTH; j++) {
+            maze[i][j] = '#';
+        }
+    }
+    
+    int visited[MAZE_HEIGHT][MAZE_WIDTH] = {0};
+    
+    int start_row = 1;
+    int start_col = 1;
+    maze[start_row][start_col] = ' ';
+    visited[start_row][start_col] = 1;
+    
+    int directions[4][2] = {{-2, 0}, {0, 2}, {2, 0}, {0, -2}};
+    
+    int (*stack)[2] = malloc(MAZE_HEIGHT * MAZE_WIDTH * sizeof(int[2]));
+    if (!stack) {
+        return;
+    }
+    int stack_top = 0;
+    
+    stack[stack_top][0] = start_row;
+    stack[stack_top][1] = start_col;
+    stack_top++;
+    
+    while (stack_top > 0) {
+        stack_top--;
+        int current_row = stack[stack_top][0];
+        int current_col = stack[stack_top][1];
+        
+        int neighbors[4][2];
+        int neighbor_count = 0;
+        
+        for (int i = 0; i < 4; i++) {
+            int next_row = current_row + directions[i][0];
+            int next_col = current_col + directions[i][1];
+            
+            if (next_row >= 1 && next_row < MAZE_HEIGHT - 1 && 
+                next_col >= 1 && next_col < MAZE_WIDTH - 1 && 
+                !visited[next_row][next_col]) {
+                neighbors[neighbor_count][0] = next_row;
+                neighbors[neighbor_count][1] = next_col;
+                neighbor_count++;
+            }
+        }
+        
+        if (neighbor_count > 0) {
+            stack[stack_top][0] = current_row;
+            stack[stack_top][1] = current_col;
+            stack_top++;
+            
+            int random_index = rand() % neighbor_count;
+            int chosen_row = neighbors[random_index][0];
+            int chosen_col = neighbors[random_index][1];
+            
+            visited[chosen_row][chosen_col] = 1;
+            
+            int wall_row = current_row + (chosen_row - current_row) / 2;
+            int wall_col = current_col + (chosen_col - current_col) / 2;
+            
+            maze[chosen_row][chosen_col] = ' ';
+            maze[wall_row][wall_col] = ' ';
+            
+            stack[stack_top][0] = chosen_row;
+            stack[stack_top][1] = chosen_col;
+            stack_top++;
+        }
+    }
+    
+    int quadrant_height_start = MAZE_HEIGHT / 2;
+    int quadrant_width_start = MAZE_WIDTH / 2;
+    
+    int exit_placed = 0;
+    int exit_row, exit_col;
+    
+    while (!exit_placed) {
+        exit_row = rand() % (MAZE_HEIGHT - quadrant_height_start - 1) + quadrant_height_start;
+        exit_col = rand() % (MAZE_WIDTH - quadrant_width_start - 1) + quadrant_width_start;
+        
+        if (maze[exit_row][exit_col] == ' ') {
+            maze[exit_row][exit_col] = 'x';
+            exit_placed = 1;
+        }
+    }
+    
+    free(stack);
+    
+    if (features & FEATURE_KEY_COLLECTION) {
+        int key_placed = 0;
+        while (!key_placed) {
+            int key_row = rand() % (MAZE_HEIGHT - 2) + 1;
+            int key_col = rand() % (MAZE_WIDTH - 2) + 1;
+            
+            if (maze[key_row][key_col] == ' ') {
+                maze[key_row][key_col] = 'k';
+                key_placed = 1;
+            }
+        }
+    }
+    
+    if (features & FEATURE_TELEPORTERS) {
+        int teleporter1_placed = 0;
+        int teleporter2_placed = 0;
+        int t1_row, t1_col, t2_row, t2_col;
+        
+        while (!teleporter1_placed) {
+            t1_row = rand() % (MAZE_HEIGHT - 2) + 1;
+            t1_col = rand() % (MAZE_WIDTH - 2) + 1;
+            
+            if (maze[t1_row][t1_col] == ' ' && 
+                !(t1_row == 1 && t1_col == 1) && 
+                !(t1_row == exit_row && t1_col == exit_col)) {
+                maze[t1_row][t1_col] = '*';
+                teleporter1_placed = 1;
+            }
+        }
+        
+        while (!teleporter2_placed) {
+            t2_row = rand() % (MAZE_HEIGHT - 2) + 1;
+            t2_col = rand() % (MAZE_WIDTH - 2) + 1;
+            
+            if (maze[t2_row][t2_col] == ' ' && 
+                !(t2_row == 1 && t2_col == 1) && 
+                !(t2_row == exit_row && t2_col == exit_col) &&
+                !(t2_row == t1_row && t2_col == t1_col)) {
+                maze[t2_row][t2_col] = '*';
+                teleporter2_placed = 1;
+            }
+        }
+    }
+    
+    if (features & FEATURE_TRAPS) {
+        int traps_placed = 0;
+        int max_traps = 5;
+        
+        while (traps_placed < max_traps) {
+            int trap_row = rand() % (MAZE_HEIGHT - 2) + 1;
+            int trap_col = rand() % (MAZE_WIDTH - 2) + 1;
+            
+            if (maze[trap_row][trap_col] == ' ' && 
+                !(trap_row == 1 && trap_col == 1) && 
+                !(trap_row == exit_row && trap_col == exit_col)) {
+                maze[trap_row][trap_col] = 'w';
+                traps_placed++;
+            }
+        }
+    }
+}
+void print_maze(char maze[MAZE_HEIGHT][MAZE_WIDTH], int player_y, int player_x, int exit_y, int exit_x) {
+    clear();
+    
+    time_t current_time = time(NULL);
+    
+    int term_height, term_width;
+    getmaxyx(stdscr, term_height, term_width);
+    
+    int viewport_height = term_height - 3;
+    int viewport_width = term_width / 2;
+    
+    if (viewport_height > MAZE_HEIGHT) viewport_height = MAZE_HEIGHT;
+    if (viewport_width > MAZE_WIDTH) viewport_width = MAZE_WIDTH;
+    
+    viewport_x = player_x - viewport_width / 2;
+    viewport_y = player_y - viewport_height / 2;
+    
+    if (viewport_x < 0) viewport_x = 0;
+    if (viewport_y < 0) viewport_y = 0;
+    if (viewport_x > MAZE_WIDTH - viewport_width) viewport_x = MAZE_WIDTH - viewport_width;
+    if (viewport_y > MAZE_HEIGHT - viewport_height) viewport_y = MAZE_HEIGHT - viewport_height;
+    
+    if (features & FEATURE_LIMITED_SIGHT) {
+        int start_row, end_row, start_col, end_col;
+        
+        
+        if (player_y < 5) {
+            start_row = 0;
+            end_row = 10;
+        } else if (player_y >= MAZE_HEIGHT - 5) {
+            start_row = MAZE_HEIGHT - 11;
+            end_row = MAZE_HEIGHT - 1;
+        } else {
+            start_row = player_y - 5;
+            end_row = player_y + 5;
+        }
+        
+        if (player_x < 10) {
+            start_col = 0;
+            end_col = 20;
+        } else if (player_x >= MAZE_WIDTH - 10) {
+            start_col = MAZE_WIDTH - 21;
+            end_col = MAZE_WIDTH - 1;
+        } else {
+            start_col = player_x - 10;
+            end_col = player_x + 10;
+        }
+        
+        for (int i = start_row; i <= end_row; i++) {
+            for (int j = start_col; j <= end_col; j++) {
+                if (i == player_y && j == player_x) {
+                    attron(COLOR_PAIR(COLOR_PLAYER));
+                    mvprintw(i - start_row, (j - start_col)*2, "ｏ");
+                    attroff(COLOR_PAIR(COLOR_PLAYER));
+                }
+                else {
+                    char display_char = maze[i][j];
+                    
+                    if (i == exit_y && j == exit_x) {
+                        if ((features & FEATURE_KEY_COLLECTION) && !player_has_key) {
+                            display_char = '#';
+                        } else {
+                            display_char = 'x';
+                        }
+                    }
+                    
+                    switch (display_char) {
+                        case '#':
+                            attron(COLOR_PAIR(COLOR_WALL));
+                            mvprintw(i - start_row, (j - start_col)*2, "＃");
+                            attroff(COLOR_PAIR(COLOR_WALL));
+                            break;
+                        case ' ':
+                            mvprintw(i - start_row, (j - start_col)*2, "　");
+                            break;
+                        case 'x':
+                            attron(COLOR_PAIR(COLOR_EXIT));
+                            mvprintw(i - start_row, (j - start_col)*2, "ｘ");
+                            attroff(COLOR_PAIR(COLOR_EXIT));
+                            break;
+                        case 'k':
+                            attron(COLOR_PAIR(COLOR_KEY));
+                            mvprintw(i - start_row, (j - start_col)*2, "ｋ");
+                            attroff(COLOR_PAIR(COLOR_KEY));
+                            break;
+                        case '*':
+                            attron(COLOR_PAIR(COLOR_TELEPORTER));
+                            mvprintw(i - start_row, (j - start_col)*2, "＊");
+                            attroff(COLOR_PAIR(COLOR_TELEPORTER));
+                            break;
+                        case 'w':
+                            if ((current_time / 2) % 2 == 0) {
+                                attron(COLOR_PAIR(COLOR_TRAP));
+                                mvprintw(i - start_row, (j - start_col)*2, "ｗ");
+                                attroff(COLOR_PAIR(COLOR_TRAP));
+                            } else {
+                                mvprintw(i - start_row, (j - start_col)*2, "　");
+                            }
+                            break;
+                        default:
+                            mvprintw(i - start_row, (j - start_col)*2, "%c", display_char);
+                            break;
+                    }
+                }
+            }
+        }
+    } else {
+        int start_row = viewport_y;
+        int end_row = viewport_y + viewport_height;
+        int start_col = viewport_x;
+        int end_col = viewport_x + viewport_width;
+        
+        if (end_row > MAZE_HEIGHT) end_row = MAZE_HEIGHT;
+        if (end_col > MAZE_WIDTH) end_col = MAZE_WIDTH;
+        
+        for (int i = start_row; i < end_row; i++) {
+            for (int j = start_col; j < end_col; j++) {
+                if (i == player_y && j == player_x) {
+                    attron(COLOR_PAIR(COLOR_PLAYER));
+                    mvprintw(i - viewport_y, (j - viewport_x)*2, "ｏ");
+                    attroff(COLOR_PAIR(COLOR_PLAYER));
+                }
+                else {
+                    char display_char = maze[i][j];
+                    
+                    if (i == exit_y && j == exit_x) {
+                        if ((features & FEATURE_KEY_COLLECTION) && !player_has_key) {
+                            display_char = '#';
+                        } else {
+                            display_char = 'x';
+                        }
+                    }
+                    
+                    switch (display_char) {
+                        case '#':
+                            attron(COLOR_PAIR(COLOR_WALL));
+                            mvprintw(i - viewport_y, (j - viewport_x)*2, "＃");
+                            attroff(COLOR_PAIR(COLOR_WALL));
+                            break;
+                        case ' ':
+                            mvprintw(i - viewport_y, (j - viewport_x)*2, "　");
+                            break;
+                        case 'x':
+                            attron(COLOR_PAIR(COLOR_EXIT));
+                            mvprintw(i - viewport_y, (j - viewport_x)*2, "ｘ");
+                            attroff(COLOR_PAIR(COLOR_EXIT));
+                            break;
+                        case 'k':
+                            attron(COLOR_PAIR(COLOR_KEY));
+                            mvprintw(i - viewport_y, (j - viewport_x)*2, "ｋ");
+                            attroff(COLOR_PAIR(COLOR_KEY));
+                            break;
+                        case '*':
+                            attron(COLOR_PAIR(5));
+                            mvprintw(i - viewport_y, (j - viewport_x)*2, "＊");
+                            attroff(COLOR_PAIR(5));
+                            break;
+                        case 'w':
+                            if ((current_time / 2) % 2 == 0) {
+                                attron(COLOR_PAIR(COLOR_TRAP));
+                                mvprintw(i - viewport_y, (j - viewport_x)*2, "ｗ");
+                                attroff(COLOR_PAIR(COLOR_TRAP));
+                            } else {
+                                mvprintw(i - viewport_y, (j - viewport_x)*2, "　");
+                            }
+                            break;
+                        default:
+                        mvprintw(i - viewport_y, (j - viewport_x)*2, "%c", display_char);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < term_width; i++) {
+        mvprintw(term_height - 3, i, "-");
+    }
+    
+    
+    int line_y = term_height - 2;
+    int status_line_pos = 0;
+    
+    if (features == 0) {
+        mvprintw(line_y, status_line_pos, "[Standard] ");
+    }
+    if (features & FEATURE_LIMITED_SIGHT) {
+        mvprintw(line_y, status_line_pos, "[Limited Sight] ");
+        status_line_pos+=17;
+    }
+    if (features & FEATURE_TELEPORTERS) {
+        mvprintw(line_y, status_line_pos, "[Teleporters] ");
+        status_line_pos+=15;
+    }
+    if (features & FEATURE_TRAPS) {
+        mvprintw(line_y, status_line_pos, "[Traps] ");
+        status_line_pos+=9;
+    }
+    if (features & FEATURE_KEY_COLLECTION) {
+        mvprintw(line_y, status_line_pos, "[Key Collection] ");
+        status_line_pos+=18;
+    }
+    if (features & FEATURE_MOVING_EXIT) {
+        mvprintw(line_y, status_line_pos, "[Moving Exit] ");
+        status_line_pos+=15;
+    }
+    if (features & FEATURE_KEY_COLLECTION) 
+        mvprintw(term_height - 1, 0, "Keys: %d/%d", player_has_key, 1);
+    
+    refresh();
+}
+
+void game_loop() {
+    char maze[MAZE_HEIGHT][MAZE_WIDTH];
+    int player_x, player_y;
+    int exit_x, exit_y;
+    int ch;
+    
+    generate_random_maze(maze);
+    
+    player_x = 1;
+    player_y = 1;
+    
+    exit_x = -1;
+    exit_y = -1;
+    for (int i = 0; i < MAZE_HEIGHT; i++) {
+        for (int j = 0; j < MAZE_WIDTH; j++) {
+            if (maze[i][j] == 'x') {
+                exit_y = i;
+                exit_x = j;
+                break;
+            }
+        }
+        if (exit_x != -1) break;
+    }
+    
+    while (game_state == STATE_PLAYING) {
+        print_maze(maze, player_y, player_x, exit_y, exit_x);
+        
+        ch = getch();
+        
+        if (ch == ERR) {
+            continue;
+        }
+        
+       
+        if (ch == KEY_RESIZE) {
+            print_maze(maze, player_y, player_x, exit_y, exit_x);
+            continue;
+        }
+        
+        if (ch == 27) {
+            game_state = STATE_TITLE;
+            return;
+        }
+        int new_x = player_x;
+        int new_y = player_y;
+        
+        if (ch == 'w') {
+            new_y--;
+        }   
+        else if (ch == 's') {
+            new_y++;
+        }
+        else if (ch == 'a') {
+            new_x--;
+        }
+        else if (ch == 'd') {
+            new_x++;
+        }
+        
+        if (new_x >= 0 && new_x < MAZE_WIDTH && new_y >= 0 && new_y < MAZE_HEIGHT && maze[new_y][new_x] != '#') {
+            player_x = new_x;
+            player_y = new_y;
+        }
+        
+        if (player_x == exit_x && player_y == exit_y) {
+            if ((features & FEATURE_KEY_COLLECTION) == 0 || player_has_key) {
+                game_state = STATE_WIN;
+                return;
+            }
+            player_x = new_x - (exit_x - player_x);
+            player_y = new_y - (exit_y - player_y);
+        }
+        
+        if (features & FEATURE_TELEPORTERS) {
+            if (maze[player_y][player_x] == '*') {
+                int dest_y = player_y;
+                int dest_x = player_x;
+                for (int i = 1; i < MAZE_HEIGHT - 1; i++) {
+                    for (int j = 1; j < MAZE_WIDTH - 1; j++) {
+                        if (maze[i][j] == '*' && (i != player_y || j != player_x)) {
+                            dest_y = i;
+                            dest_x = j;
+                            break;
+                        }
+                    }
+                    if (dest_y != player_y || dest_x != player_x) {
+                        break;
+                    }
+                }
+                
+                player_y = dest_y;
+                player_x = dest_x;
+            }
+        }
+        
+        if (features & FEATURE_TRAPS) {
+            if (maze[player_y][player_x] == 'w' && (time(NULL) / 2) % 2 == 0) {
+                game_state = STATE_LOSE;
+                return;
+            }
+        }
+        
+        if (features & FEATURE_KEY_COLLECTION) {
+            if (maze[player_y][player_x] == 'k') {
+                player_has_key = 1;
+                maze[player_y][player_x] = ' ';
+            }
+        }
+        
+        if (features & FEATURE_MOVING_EXIT) {
+            player_move_count++;
+            if (player_move_count >= 2) {
+                player_move_count = 0;
+                
+                int old_exit_x = exit_x;
+                int old_exit_y = exit_y;
+                
+                int distances[4];
+                int new_positions[4][2];
+                
+                new_positions[0][0] = exit_y - 1;
+                new_positions[0][1] = exit_x;
+                distances[0] = calculate_actual_distance(maze, new_positions[0][1], new_positions[0][0], player_x, player_y);
+                
+                new_positions[1][0] = exit_y;
+                new_positions[1][1] = exit_x + 1;
+                distances[1] = calculate_actual_distance(maze, new_positions[1][1], new_positions[1][0], player_x, player_y);
+                
+                new_positions[2][0] = exit_y + 1;
+                new_positions[2][1] = exit_x;
+                distances[2] = calculate_actual_distance(maze, new_positions[2][1], new_positions[2][0], player_x, player_y);
+                
+                new_positions[3][0] = exit_y;
+                new_positions[3][1] = exit_x - 1;
+                distances[3] = calculate_actual_distance(maze, new_positions[3][1], new_positions[3][0], player_x, player_y);
+                
+                int max_distance = -1;
+                int best_direction = -1;
+                
+                for (int i = 0; i < 4; i++) {
+                    if (new_positions[i][1] >= 0 && new_positions[i][1] < MAZE_WIDTH &&
+                        new_positions[i][0] >= 0 && new_positions[i][0] < MAZE_HEIGHT &&
+                        maze[new_positions[i][0]][new_positions[i][1]] != '#' &&
+                        !(new_positions[i][0] == player_y && new_positions[i][1] == player_x) &&
+                        distances[i] > max_distance) {
+                        max_distance = distances[i];
+                        best_direction = i;
+                    }
+                }
+                
+                if (best_direction == -1 || max_distance <= abs(player_x - exit_x) + abs(player_y - exit_y)) {
+                    max_distance = -1;
+                    for (int i = 0; i < 4; i++) {
+                        if (new_positions[i][1] >= 0 && new_positions[i][1] < MAZE_WIDTH &&
+                            new_positions[i][0] >= 0 && new_positions[i][0] < MAZE_HEIGHT &&
+                            maze[new_positions[i][0]][new_positions[i][1]] != '#' &&
+                            !(new_positions[i][0] == player_y && new_positions[i][1] == player_x) &&
+                            (best_direction == -1 || distances[i] > max_distance)) {
+                            max_distance = distances[i];
+                            best_direction = i;
+                        }
+                    }
+                }
+                
+                if (best_direction != -1) {
+                    if (new_positions[best_direction][1] >= 0 && new_positions[best_direction][1] < MAZE_WIDTH &&
+                        new_positions[best_direction][0] >= 0 && new_positions[best_direction][0] < MAZE_HEIGHT &&
+                        maze[new_positions[best_direction][0]][new_positions[best_direction][1]] != '#') {
+                        maze[old_exit_y][old_exit_x] = ' ';
+                        
+                        exit_y = new_positions[best_direction][0];
+                        exit_x = new_positions[best_direction][1];
+                        
+                        maze[exit_y][exit_x] = 'x';
+                    }
+                }
+            }
+        }
+
+        (void)ch;
+    }
+}
+
+int calculate_actual_distance(char maze[MAZE_HEIGHT][MAZE_WIDTH], int start_x, int start_y, int target_x, int target_y) {
+    if (start_x < 0 || start_x >= MAZE_WIDTH || start_y < 0 || start_y >= MAZE_HEIGHT ||
+        maze[start_y][start_x] == '#') {
+        return -1;
+    }
+    
+    if (target_x < 0 || target_x >= MAZE_WIDTH || target_y < 0 || target_y >= MAZE_HEIGHT) {
+        return -1;
+    }
+    
+    if (start_x == target_x && start_y == target_y) {
+        return 0;
+    }
+    
+    int queue[MAZE_WIDTH * MAZE_HEIGHT][2];
+    int front = 0, rear = 0;
+    
+    int visited[MAZE_HEIGHT][MAZE_WIDTH] = {0};
+    
+    int distances[MAZE_HEIGHT][MAZE_WIDTH];
+    for (int i = 0; i < MAZE_HEIGHT; i++) {
+        for (int j = 0; j < MAZE_WIDTH; j++) {
+            distances[i][j] = -1;
+        }
+    }
+    
+    queue[rear][0] = start_y;
+    queue[rear][1] = start_x;
+    rear++;
+    visited[start_y][start_x] = 1;
+    distances[start_y][start_x] = 0;
+    
+    int dx[4] = {0, 1, 0, -1};
+    int dy[4] = {-1, 0, 1, 0};
+    
+    while (front < rear) {
+        int current_y = queue[front][0];
+        int current_x = queue[front][1];
+        front++;
+        
+        if (current_x == target_x && current_y == target_y) {
+            return distances[current_y][current_x];
+        }
+        
+        for (int i = 0; i < 4; i++) {
+            int new_y = current_y + dy[i];
+            int new_x = current_x + dx[i];
+            
+            if (new_x >= 0 && new_x < MAZE_WIDTH && new_y >= 0 && new_y < MAZE_HEIGHT &&
+                !visited[new_y][new_x] && maze[new_y][new_x] != '#') {
+                
+                visited[new_y][new_x] = 1;
+                distances[new_y][new_x] = distances[current_y][current_x] + 1;
+                queue[rear][0] = new_y;
+                queue[rear][1] = new_x;
+                rear++;
+                
+                if (new_x == target_x && new_y == target_y) {
+                    return distances[new_y][new_x];
+                }
+            }
+        }
+    }
+    
+    return -1;
+}
